@@ -1,8 +1,9 @@
-from llmware.models import ModelCatalog
-from llmware.configs import LLMWareConfig
 import time
 from pathlib import Path
 from typing import Callable
+
+from llmware.models import ModelCatalog
+
 
 class GenerationStats:
     def __init__(self, ttft: float, total_duration: float, total_tokens: int):
@@ -15,11 +16,12 @@ class GenerationStats:
             return self.total_tokens / self.total_duration
         return 0.0
 
+
 class LlmEngine:
     def __init__(self, model_path: Path = None, tokenizer_path: Path = None):
         self.is_npu = False
         self.model_name = "qwen2.5-7b-instruct-onnx-qnn"
-        
+
         try:
             print(f"Initializing NPU model: {self.model_name}...")
             # llmware handles NPU discovery automatically for onnx-qnn models
@@ -42,7 +44,8 @@ class LlmEngine:
         # Some models might need a slightly different stream iteration
         try:
             for token in self.model.stream(prompt):
-                if not token: continue
+                if not token:
+                    continue
 
                 # Ensure it's a clean string
                 token_str = str(token)
@@ -59,7 +62,7 @@ class LlmEngine:
         return GenerationStats(
             ttft=first_token_time or total_duration,
             total_duration=total_duration,
-            total_tokens=token_count
+            total_tokens=token_count,
         )
 
     def reset(self):
