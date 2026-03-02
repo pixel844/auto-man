@@ -1,11 +1,11 @@
 import shutil
 import tempfile
-from pathlib import Path
-import json
+import os
 import uuid
+import json
+from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
-import os
 
 from llmware.library import Library
 from llmware.retrieval import Query
@@ -20,11 +20,8 @@ class RepoEntry:
 
     def to_dict(self):
         return {
-            "id": self.id,
-            "type": self.type,
-            "url_or_path": self.url_or_path,
-            "last_indexed": self.last_indexed,
-            "status": self.status
+            "id": self.id, "type": self.type, "url_or_path": self.url_or_path,
+            "last_indexed": self.last_indexed, "status": self.status
         }
 
     @classmethod
@@ -37,19 +34,16 @@ class Rag:
         self.easydocz_dir = project_root / ".easydocz"
         self.easydocz_dir.mkdir(exist_ok=True)
         self.registry_path = self.easydocz_dir / "repos.json"
-        
         self.library_name = "auto_man_temp_lib"
         self.library = None
 
     def _load_registry(self) -> List[RepoEntry]:
-        if not self.registry_path.exists():
-            return []
+        if not self.registry_path.exists(): return []
         with open(self.registry_path, 'r') as f:
-            try:
+            try: 
                 data = json.load(f)
                 return [RepoEntry.from_dict(d) for d in data]
-            except:
-                return []
+            except: return []
 
     def _save_registry(self, registry: List[RepoEntry]):
         with open(self.registry_path, 'w') as f:
@@ -58,12 +52,7 @@ class Rag:
     def add_repo(self, url_or_path: str, is_remote: bool) -> str:
         registry = self._load_registry()
         repo_id = str(uuid.uuid4())[:8]
-        entry = RepoEntry(
-            id=repo_id,
-            type="remote" if is_remote else "local",
-            url_or_path=url_or_path,
-            status="pending"
-        )
+        entry = RepoEntry(id=repo_id, type="remote" if is_remote else "local", url_or_path=url_or_path)
         registry.append(entry)
         self._save_registry(registry)
         return repo_id
@@ -71,8 +60,7 @@ class Rag:
     def index_repo(self, repo_id: str) -> bool:
         registry = self._load_registry()
         entry = next((e for e in registry if e.id == repo_id), None)
-        if not entry:
-            raise ValueError(f"Repo ID {repo_id} not found")
+        if not entry: raise ValueError(f"Repo ID {repo_id} not found")
 
         if entry.type == "remote":
             root = self.easydocz_dir / "repos" / repo_id
@@ -83,85 +71,67 @@ class Rag:
         else:
             root = Path(entry.url_or_path)
 
+        # Create a uniquely named library for this session
         self.library_name = f"lib_{repo_id}_{datetime.now().strftime('%H%M%S')}"
+        print(f"Indexing repository at {root} into {self.library_name}...")
+        
         self.library = Library().create_new_library(self.library_name)
 
         with tempfile.TemporaryDirectory() as tmp_scan_dir:
             scan_path = Path(tmp_scan_dir)
-            extensions = [".py", ".md", ".txt", ".sh", ".js", ".ts", ".rs", ".c", ".cpp"]
+            extensions = [".py", ".md", ".txt", ".sh", ".js", ".ts", ".rs", ".c", ".cpp", ".toml"]
             indexed_count = 0
             
             for file_path in root.rglob("*"):
                 if any(part in [".venv", "venv", ".git", "__pycache__", "target", "build"] for part in file_path.parts):
                     continue
-                    
                 if file_path.is_file() and file_path.suffix.lower() in extensions:
                     rel_name = str(file_path.relative_to(root)).replace(os.sep, "_")
-                    safe_name = f"{rel_name}.txt"
-                    shutil.copy2(file_path, scan_path / safe_name)
+                    shutil.copy2(file_path, scan_path / f"{rel_name}.txt")
                     indexed_count += 1
 
             if indexed_count > 0:
                 self.library.add_files(input_folder_path=str(scan_path))
 
         self.library = Library().load_library(self.library_name)
-        
         entry.status = "indexed"
         entry.last_indexed = datetime.utcnow().isoformat()
         self._save_registry(registry)
         return True
 
     def retrieve_context(self, query_str: str) -> str:
-        lib = Library().load_library(self.library_name)
-        results = Query(lib).get_whole_library()
-        
+        if not self.library:
+            if not self.library_name: return ""
+            self.library = Library().load_library(self.library_name)
+            
+        results = Query(self.library).get_whole_library()
         results.sort(key=lambda x: (x.get("file_source", ""), x.get("block_ID", 0)))
         
         context_parts = []
         current_file = ""
         current_length = 0
-        MAX_CHARS = 5000 
+        MAX_CHARS = 7500
+        priority_files = ["main.py", "requirements.txt", "README.md", "llm_engine.py"]
 
-        priority_files = ["main.py", "requirements.txt", "README.md"]
-        
         for res in results:
-            file_source = res.get("file_source", "unknown")
-            is_priority = any(p in file_source for p in priority_files)
-            if not is_priority: continue
-            
-            text = (res.get("text_search") or res.get("text") or res.get("content") or "").strip()
+            file_src = res.get("file_source", "")
+            if not any(p in file_src for p in priority_files): continue
+            text = (res.get("text_search") or res.get("text") or "").strip()
             if not text: continue
-
-            block_text = ""
-            if file_source != current_file:
-                block_text += f"\n=== FILE: {file_source} ===\n"
-                current_file = file_source
-            block_text += text + "\n"
-            
-            if current_length + len(block_text) > MAX_CHARS:
-                break
-            context_parts.append(block_text)
-            current_length += len(block_text)
+            chunk = f"\n=== FILE: {file_src} ===\n{text}\n"
+            if current_length + len(chunk) > MAX_CHARS: break
+            context_parts.append(chunk)
+            current_length += len(chunk)
 
         for res in results:
             if current_length >= MAX_CHARS: break
-            
-            file_source = res.get("file_source", "unknown")
-            is_priority = any(p in file_source for p in priority_files)
-            if is_priority: continue
-            
-            text = (res.get("text_search") or res.get("text") or res.get("content") or "").strip()
+            file_src = res.get("file_source", "")
+            if any(p in file_src for p in priority_files): continue
+            text = (res.get("text_search") or res.get("text") or "").strip()
             if not text: continue
-
-            block_text = ""
-            if file_source != current_file:
-                block_text += f"\n=== FILE: {file_source} ===\n"
-                current_file = file_source
-            block_text += text + "\n"
-            
-            if current_length + len(block_text) > MAX_CHARS:
-                break
-            context_parts.append(block_text)
-            current_length += len(block_text)
+            chunk = f"\n=== FILE: {file_src} ===\n{text}\n"
+            if current_length + len(chunk) > MAX_CHARS: break
+            context_parts.append(chunk)
+            current_length += len(chunk)
 
         return "".join(context_parts)

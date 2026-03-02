@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-# Set up llmware config
+# Configuration
 from llmware.configs import LLMWareConfig
 
 from llm_engine import LlmEngine
@@ -17,14 +17,9 @@ def get_base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).parent
 
-# Foundation: Set the llmware home to project-local models folder
 BASE_DIR = get_base_dir()
-MODELS_HOME = BASE_DIR / "models"
-MODELS_HOME.mkdir(parents=True, exist_ok=True)
-LLMWareConfig().set_home(str(MODELS_HOME))
-
-# llmware creates 'model_repo' inside the home path
-DEFAULT_MODELS_DIR = MODELS_HOME / "model_repo"
+# Set llmware home to models/
+LLMWareConfig().set_home(str(BASE_DIR / "models"))
 
 class PromptHandler:
     def __init__(self, model_name: str = ""):
@@ -38,77 +33,52 @@ class PromptHandler:
     def get_prompt_with_tag(self, prompt: str) -> str:
         return f"{self.user_tag}{prompt}{self.assistant_tag}"
 
-def chat_split(end_line: bool):
-    split_line = "-" * 80
-    print(f"\n{split_line}", end="")
-    if end_line:
-        print()
-
 def get_available_models(models_dir: Path):
     available = []
-    # Check models/ and models/model_repo/ (where llmware downloads)
     search_paths = [models_dir, models_dir / "model_repo"]
-    
     for path in search_paths:
         if not path.exists(): continue
         for d in path.iterdir():
-            if d.is_dir() and (d / "model.onnx").exists() and (d / "tokenizer.json").exists():
-                if d not in available:
-                    available.append(d)
+            if d.is_dir() and (d / "model.onnx").exists():
+                if d not in available: available.append(d)
     return available
 
 def select_model(models_dir: Path) -> Path:
     available = get_available_models(models_dir)
-    
     if not available:
         catalog_name = "qwen2.5-7b-instruct-onnx-qnn"
-        print(f"No local models found. Defaulting to '{catalog_name}' in models/model_repo.")
         return models_dir / "model_repo" / catalog_name
     
-    if len(available) == 1:
-        print(f"Using only available model: {available[0].name}")
-        return available[0]
+    if len(available) == 1: return available[0]
     
     print("\nAvailable models:")
     for i, m in enumerate(available):
-        print(f"[{i}] {m.name} ({m.parent.name})")
+        print(f"[{i}] {m.name}")
     
     while True:
         try:
             choice = input(f"Select a model (0-{len(available)-1}): ").strip()
             idx = int(choice)
-            if 0 <= idx < len(available):
-                return available[idx]
-        except (ValueError, IndexError, EOFError, KeyboardInterrupt):
-            pass
-        print("Invalid selection. Please try again.")
+            if 0 <= idx < len(available): return available[idx]
+        except: pass
+        print("Invalid selection.")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Auto-Man: A local universal (.man) generator using Qualcomm NPU acceleration (LLMWare Edition)."
-    )
-    parser.add_argument("-m", "--model_path", help="Path to the model directory")
+    parser = argparse.ArgumentParser(description="Auto-Man: NPU-Accelerated Manual Generator")
+    parser.add_argument("-m", "--model_path", help="Path to model directory")
     parser.add_argument("-r", "--repo", help="Repository URL or local path")
-    parser.add_argument("-p", "--prompt", help="Run a single generation and exit")
-    parser.add_argument("--mcp", action="store_true", help="Start the MCP server loop")
-    parser.add_argument("--gui", action="store_true", help="Start the PyQt6 GUI")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
-    
+    parser.add_argument("-p", "--prompt", help="Run single generation")
+    parser.add_argument("--mcp", action="store_true", help="Start MCP server")
+    parser.add_argument("--gui", action="store_true", help="Start PyQt6 GUI")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     args = parser.parse_args()
 
-    base_dir = BASE_DIR # Use the globally resolved BASE_DIR
-    lib_dir = base_dir / "lib"
-    
-    # Bundle OS-specific binaries if QAIRT is found
-    setup_npu.ensure_npu_env(lib_dir)
+    # 1. Setup NPU Binaries
+    setup_npu.ensure_npu_env(BASE_DIR / "lib")
 
-    models_dir = base_dir / "models"
-    
-    try:
-        model_dir = Path(args.model_path) if args.model_path else select_model(models_dir)
-    except Exception as e:
-        print(f"Error selecting model: {e}")
-        sys.exit(1)
+    # 2. Select Model
+    models_dir = BASE_DIR / "models"
+    model_dir = Path(args.model_path) if args.model_path else select_model(models_dir)
 
     if args.gui:
         import gui
@@ -118,25 +88,14 @@ def main():
         window.show()
         sys.exit(app.exec())
 
-    print("--- Auto-Man Starting (LLMWare + Qwen Edition) ---")
-    
-    try:
-        run(args, model_dir)
-    except Exception as e:
-        print(f"\n[FATAL ERROR] Application failed to start:\n  {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    print("--- Auto-Man Starting ---")
+    run(args, model_dir)
 
 def run(args, model_dir):
-    model_path = model_dir / "model.onnx" if model_dir.exists() and model_dir.is_dir() else model_dir
-    tokenizer_path = model_dir / "tokenizer.json" if model_dir.exists() and model_dir.is_dir() else model_dir
-    
-    model = LlmEngine(model_path, tokenizer_path)
+    # 1. Initialize Engines
+    model = LlmEngine()
     rag = Rag(BASE_DIR)
     
-    print(f"Model and RAG engine loaded successfully.")
-
     if args.mcp:
         server = McpServer(model, rag)
         import json
@@ -148,106 +107,48 @@ def run(args, model_dir):
                 response = server.handle_request(request)
                 print(json.dumps(response))
                 sys.stdout.flush()
-            except Exception as e:
-                err_resp = {
-                    "jsonrpc": "2.0",
-                    "id": None,
-                    "error": { "code": -32700, "message": f"Parse error: {e}" }
-                }
-                print(json.dumps(err_resp))
-                sys.stdout.flush()
+            except: pass
     elif args.prompt:
         handler = PromptHandler(model.model_name)
         tagged_prompt = handler.get_prompt_with_tag(args.prompt)
-        print(f"Prompt: {args.prompt}")
-        print("Output: ", end="", flush=True)
-        model.generate(tagged_prompt, lambda token: print(token, end="", flush=True))
+        model.generate(tagged_prompt, lambda t: print(t, end="", flush=True))
         print()
     else:
-        repo_url = args.repo
-        if not repo_url:
-            try:
-                repo_url = input("Repo link: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                return
-
-        if not repo_url:
-            print("No repository provided. Exiting.")
-            return
+        # Default CLI Flow
+        repo_url = args.repo or input("Repo link: ").strip()
+        if not repo_url: return
 
         server = McpServer(model, rag)
         
-        print(f"\nScanning {repo_url}...")
-        tree_resp = server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "fetch_tree", "params": {"url": repo_url}
-        })
-        
-        if "error" in tree_resp:
-            print(f"Error: {tree_resp['error']['message']}")
-            return
-            
-        print("\n--- Repository Structure ---")
-        print(tree_resp["result"]["content"][0]["text"])
-        print("----------------------------")
-        
-        try:
-            confirm = input("\nDo you want to generate a manual for this repository? (y/n): ").lower()
-        except (EOFError, KeyboardInterrupt):
-            return
-            
-        if confirm != 'y':
-            print("Operation cancelled.")
-            return
+        # Confirmation step
+        tree_resp = server.handle_request({"jsonrpc":"2.0","id":1,"method":"fetch_tree","params":{"url":repo_url}})
+        print("\n--- Repository Structure ---\n" + tree_resp["result"]["content"][0]["text"] + "\n----------------------------")
+        if input("\nGenerate manual? (y/n): ").lower() != 'y': return
 
-        print("\n[1/2] Indexing repository context...")
+        # Indexing
+        print("\n[1/2] Indexing context...")
         is_remote = repo_url.startswith("http") or repo_url.endswith(".git")
-        add_resp = server.handle_request({
-            "jsonrpc": "2.0", "id": 2, "method": "add_repo", "params": {"url": repo_url, "is_remote": is_remote}
-        })
+        add_resp = server.handle_request({"jsonrpc":"2.0","id":2,"method":"add_repo","params":{"url":repo_url,"is_remote":is_remote}})
         repo_id = add_resp["result"]["content"][0]["text"].split(": ")[1]
-        server.handle_request({
-            "jsonrpc": "2.0", "id": 3, "method": "index_repo", "params": {"id": repo_id}
-        })
+        server.handle_request({"jsonrpc":"2.0","id":3,"method":"index_repo","params":{"id":repo_id}})
 
-        print("[2/2] Generating .man page (Streaming)...\n")
-        
+        # Generation
+        print("[2/2] Generating .man page...\n")
         repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-        output_filename = f"{repo_name}.man"
-        output_path = Path.cwd() / output_filename
-
-        # Single broad context retrieval
-        full_context = rag.retrieve_context("Full project source code and summary")
+        output_path = Path.cwd() / f"{repo_name}.man"
         
+        full_context = rag.retrieve_context("Full project source code")
         handler = PromptHandler(model.model_name)
         prompt = handler.get_prompt_with_tag(
-            "Extract actual CLI flags and logic from the provided source code to fill in this ROFF .man template for 'Auto-Man'.\n\n"
-            "--- TEMPLATE ---\n"
-            ".TH AUTO-MAN 1\n"
-            ".SH NAME\n"
-            "auto-man \\- [Summarize the tool here]\n"
-            ".SH SYNOPSIS\n"
-            "python main.py [options]\n"
-            ".SH DESCRIPTION\n"
-            "[Detailed description extracted from code]\n"
-            ".SH OPTIONS\n"
-            "[Extract flags like --gui, --repo, --mcp, --prompt here]\n"
-            ".SH EXAMPLES\n"
-            "[Provide 2 usage examples]\n"
-            "--- END TEMPLATE ---\n\n"
-            f"--- SOURCE CODE CONTEXT ---\n{full_context}\n--- END CONTEXT ---"
+            f"Extract CLI flags and logic from this source code to fill the template for 'Auto-Man'.\n"
+            "Template: .TH AUTO-MAN 1, .SH NAME, .SH SYNOPSIS, .SH DESCRIPTION, .SH OPTIONS, .SH EXAMPLES.\n"
+            f"SOURCE:\n{full_context}"
         )
 
-        output_content = []
-        def cli_callback(token):
-            print(token, end="", flush=True)
-            output_content.append(token)
-
-        model.generate(prompt, cli_callback)
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write("".join(output_content))
-            
-        print(f"\n\nSuccess! Technical manual saved to: {output_path}")
+        content = []
+        model.generate(prompt, lambda t: (print(t, end="", flush=True), content.append(t)))
+        output_path.write_text("".join(content), encoding="utf-8")
+        print(f"\n\nSaved to: {output_path}")
 
 if __name__ == "__main__":
     main()
