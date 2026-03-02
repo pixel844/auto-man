@@ -2,6 +2,7 @@
 __pycache__/
 .cache/
 .mypy_cache/
+site-packages/
 models/
 *PLAN.md
 *.man
