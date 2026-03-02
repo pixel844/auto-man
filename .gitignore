@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.easydocz/
+models/
+lib/
+*.man
+*.exe
+*.dll
+*.so
+*.bin
+.DS_Store
+.env
