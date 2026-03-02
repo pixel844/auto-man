@@ -10,3 +10,8 @@ models/
 *.bin
 .DS_Store
 .env
+.mypy_cache/
+site-packages/
+
+*.egg-info/
+*.egg
