@@ -58,8 +58,9 @@ class McpWorker(QObject):
         try:
             # 1. Add Repo
             self.progress_update.emit("Adding Repository...", 30)
+            is_remote = url.startswith("http") or url.endswith(".git")
             resp = self.server.handle_request({
-                "jsonrpc": "2.0", "id": 2, "method": "add_repo", "params": {"url": url, "is_remote": False}
+                "jsonrpc": "2.0", "id": 2, "method": "add_repo", "params": {"url": url, "is_remote": is_remote}
             })
             self.repo_id = resp["result"]["content"][0]["text"].split(": ")[1]
 
@@ -76,22 +77,37 @@ class McpWorker(QObject):
             output_filename = f"{repo_name}.man"
             output_path = Path.cwd() / output_filename
             
+            output_content = []
             def token_cb(token):
                 self.token_received.emit(token)
+                output_content.append(token)
 
-            summary_context = self.server.rag.retrieve_context(f"General purpose and summary of repo {self.repo_id}")
-            commands_context = self.server.rag.retrieve_context(f"CLI flags and entry points in repo {self.repo_id}")
+            summary_context = self.server.rag.retrieve_context("General summary and purpose of the project")
+            commands_context = self.server.rag.retrieve_context("Command line arguments, CLI flags, and main entry points")
+            
             full_context = f"Summary: {summary_context}\nCommands: {commands_context}"
             
             prompt = f"Generate a ROFF .man page for this repo:\n{full_context}"
             
             self.server.model.generate(prompt, token_cb)
             
+            # Clean and save
+            final_content = "".join(output_content)
+            import re
+            final_content = re.sub(r'.\x08', '', final_content)
+            final_content = final_content.replace('\x08', '').replace('\\b', '')
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(final_content)
+
             self.progress_update.emit("Saving file...", 95)
             self.finished.emit(str(output_path))
             
         except Exception as e:
             self.error.emit(f"Generation Error: {str(e)}")
+        finally:
+            if hasattr(self.server, 'rag'):
+                self.server.rag.cleanup()
 
 class TreeConfirmDialog(QDialog):
     def __init__(self, tree_text, parent=None):

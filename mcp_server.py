@@ -260,6 +260,17 @@ class McpServer:
             
         return { "content": [{ "type": "text", "text": "\n".join(tree) }] }
 
+    def _clean_roff(self, text: str) -> str:
+        # Remove literal \b and actual backspace characters
+        import re
+        # Remove character followed by backspace (bold/underline simulation)
+        text = re.sub(r'.\x08', '', text)
+        # Remove remaining backspaces
+        text = text.replace('\x08', '')
+        # Remove literal \b that some models output
+        text = text.replace('\\b', '')
+        return text
+
     def generate_man(self, args: Dict) -> Dict:
         repo_id = args.get("repo_id")
         if not repo_id: raise ValueError("Missing repo_id")
@@ -276,9 +287,9 @@ class McpServer:
         output_path = Path.cwd() / output_filename
         
         # Multiple RAG queries for better context
-        summary_context = self.rag.retrieve_context(f"General purpose and summary of repo {repo_id}")
-        commands_context = self.rag.retrieve_context(f"Command line arguments, CLI flags, and main entry points in repo {repo_id}")
-        examples_context = self.rag.retrieve_context(f"Usage examples and typical command lines in repo {repo_id}")
+        summary_context = self.rag.retrieve_context("General purpose and summary of the project")
+        commands_context = self.rag.retrieve_context("Command line arguments, CLI flags, and main entry points")
+        examples_context = self.rag.retrieve_context("Usage examples and typical command lines")
         
         full_context = f"--- SUMMARY ---\n{summary_context}\n\n--- COMMANDS & ARGS ---\n{commands_context}\n\n--- EXAMPLES ---\n{examples_context}"
         
@@ -298,7 +309,7 @@ class McpServer:
         with self.lock:
             self.model.generate(prompt, lambda t: response_parts.append(t))
 
-        final_man_content = "".join(response_parts)
+        final_man_content = self._clean_roff("".join(response_parts))
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(final_man_content)
         

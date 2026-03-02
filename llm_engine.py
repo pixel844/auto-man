@@ -38,15 +38,23 @@ class LlmEngine:
         start_time = time.perf_counter()
         token_count = 0
         first_token_time = None
-        
-        # Use llmware's native streaming
-        for token in self.model.stream(prompt):
-            if first_token_time is None:
-                first_token_time = time.perf_counter() - start_time
-            
-            callback(token)
-            token_count += 1
-            
+
+        # Some models might need a slightly different stream iteration
+        try:
+            for token in self.model.stream(prompt):
+                if not token: continue
+
+                # Ensure it's a clean string
+                token_str = str(token)
+
+                if first_token_time is None:
+                    first_token_time = time.perf_counter() - start_time
+
+                callback(token_str)
+                token_count += 1
+        except Exception as e:
+            print(f"\n[Error during generation] {e}")
+
         total_duration = time.perf_counter() - start_time
         return GenerationStats(
             ttft=first_token_time or total_duration,

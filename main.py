@@ -10,7 +10,6 @@ from llmware.configs import LLMWareConfig
 from llm_engine import LlmEngine
 from rag import Rag
 from mcp_server import McpServer
-import setup_npu
 
 def get_base_dir() -> Path:
     if getattr(sys, 'frozen', False):
@@ -70,14 +69,34 @@ def main():
     parser.add_argument("-p", "--prompt", help="Run single generation")
     parser.add_argument("--mcp", action="store_true", help="Start MCP server")
     parser.add_argument("--gui", action="store_true", help="Start PyQt6 GUI")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--reset", action="store_true", help="Uninstall custom models and clear cache")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     args = parser.parse_args()
 
-    # 1. Setup NPU Binaries
-    setup_npu.ensure_npu_env(BASE_DIR / "lib")
-
-    # 2. Select Model
     models_dir = BASE_DIR / "models"
+
+    if args.reset:
+        print("--- Resetting Auto-Man Environment ---")
+        # 1. Clear .cache
+        rag = Rag(BASE_DIR)
+        rag.cleanup()
+
+        # 2. Uninstall non-default models
+        if models_dir.exists():
+            print(f"Cleaning models in {models_dir} (preserving model_repo)...")
+            import shutil
+            for item in models_dir.iterdir():
+                if item.is_dir() and item.name != "model_repo":
+                    print(f"Removing custom model: {item.name}")
+                    try:
+                        shutil.rmtree(item)
+                    except Exception as e:
+                        print(f"Warning: Could not remove {item.name}: {e}")
+        print("Reset complete.")
+        sys.exit(0)
+
+    # Model Selection
+
     model_dir = Path(args.model_path) if args.model_path else select_model(models_dir)
 
     if args.gui:
@@ -92,63 +111,87 @@ def main():
     run(args, model_dir)
 
 def run(args, model_dir):
-    # 1. Initialize Engines
+    # Initialize Engines
     model = LlmEngine()
     rag = Rag(BASE_DIR)
     
-    if args.mcp:
-        server = McpServer(model, rag)
-        import json
-        for line in sys.stdin:
-            line = line.strip()
-            if not line: continue
-            try:
-                request = json.loads(line)
-                response = server.handle_request(request)
-                print(json.dumps(response))
-                sys.stdout.flush()
-            except: pass
-    elif args.prompt:
-        handler = PromptHandler(model.model_name)
-        tagged_prompt = handler.get_prompt_with_tag(args.prompt)
-        model.generate(tagged_prompt, lambda t: print(t, end="", flush=True))
-        print()
-    else:
-        # Default CLI Flow
-        repo_url = args.repo or input("Repo link: ").strip()
-        if not repo_url: return
+    try:
+        if args.mcp:
+            server = McpServer(model, rag)
+            import json
+            for line in sys.stdin:
+                line = line.strip()
+                if not line: continue
+                try:
+                    request = json.loads(line)
+                    response = server.handle_request(request)
+                    print(json.dumps(response))
+                    sys.stdout.flush()
+                except: pass
+        elif args.prompt:
+            handler = PromptHandler(model.model_name)
+            tagged_prompt = handler.get_prompt_with_tag(args.prompt)
+            model.generate(tagged_prompt, lambda t: print(t, end="", flush=True))
+            print()
+        else:
+            # Default CLI Flow
+            repo_url = args.repo or input("Repo link: ").strip()
+            if not repo_url: return
 
-        server = McpServer(model, rag)
-        
-        # Confirmation step
-        tree_resp = server.handle_request({"jsonrpc":"2.0","id":1,"method":"fetch_tree","params":{"url":repo_url}})
-        print("\n--- Repository Structure ---\n" + tree_resp["result"]["content"][0]["text"] + "\n----------------------------")
-        if input("\nGenerate manual? (y/n): ").lower() != 'y': return
+            server = McpServer(model, rag)
+            
+            # Confirmation step
+            tree_resp = server.handle_request({"jsonrpc":"2.0","id":1,"method":"fetch_tree","params":{"url":repo_url}})
+            print("\n--- Repository Structure ---\n" + tree_resp["result"]["content"][0]["text"] + "\n----------------------------")
+            if input("\nGenerate manual? (y/n): ").lower() != 'y': return
 
-        # Indexing
-        print("\n[1/2] Indexing context...")
-        is_remote = repo_url.startswith("http") or repo_url.endswith(".git")
-        add_resp = server.handle_request({"jsonrpc":"2.0","id":2,"method":"add_repo","params":{"url":repo_url,"is_remote":is_remote}})
-        repo_id = add_resp["result"]["content"][0]["text"].split(": ")[1]
-        server.handle_request({"jsonrpc":"2.0","id":3,"method":"index_repo","params":{"id":repo_id}})
+            # Indexing
+            print("\n[1/2] Indexing context...")
+            is_remote = repo_url.startswith("http") or repo_url.endswith(".git")
+            add_resp = server.handle_request({"jsonrpc":"2.0","id":2,"method":"add_repo","params":{"url":repo_url,"is_remote":is_remote}})
+            repo_id = add_resp["result"]["content"][0]["text"].split(": ")[1]
+            server.handle_request({"jsonrpc":"2.0","id":3,"method":"index_repo","params":{"id":repo_id}})
 
-        # Generation
-        print("[2/2] Generating .man page...\n")
-        repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-        output_path = Path.cwd() / f"{repo_name}.man"
-        
-        full_context = rag.retrieve_context("Full project source code")
-        handler = PromptHandler(model.model_name)
-        prompt = handler.get_prompt_with_tag(
-            f"Extract CLI flags and logic from this source code to fill the template for 'Auto-Man'.\n"
-            "Template: .TH AUTO-MAN 1, .SH NAME, .SH SYNOPSIS, .SH DESCRIPTION, .SH OPTIONS, .SH EXAMPLES.\n"
-            f"SOURCE:\n{full_context}"
-        )
+            # Generation
+            print("[2/2] Generating .man page...\n")
+            repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
+            output_path = Path.cwd() / f"{repo_name}.man"
+            
+            full_context = rag.retrieve_context("Full project source code")
+            handler = PromptHandler(model.model_name)
+            prompt = handler.get_prompt_with_tag(
+                "You are a technical writer. Generate a ROFF .man page for 'Auto-Man'.\n"
+                "Identify and describe these flags from the code: --repo, --gui, --mcp, --reset, --prompt, --model_path.\n\n"
+                "--- ROFF TEMPLATE ---\n"
+                ".TH AUTO-MAN 1\n"
+                ".SH NAME\n"
+                "auto-man \\- NPU manual generator\n"
+                ".SH SYNOPSIS\n"
+                "python main.py [options]\n"
+                ".SH DESCRIPTION\n"
+                "[Summarize tool]\n"
+                ".SH OPTIONS\n"
+                "[Describe flags]\n"
+                ".SH EXAMPLES\n"
+                "[Usage example]\n"
+                "--- END TEMPLATE ---\n\n"
+                f"--- CODE ---\n{full_context}"
+            )
 
-        content = []
-        model.generate(prompt, lambda t: (print(t, end="", flush=True), content.append(t)))
-        output_path.write_text("".join(content), encoding="utf-8")
-        print(f"\n\nSaved to: {output_path}")
+            content = []
+            model.generate(prompt, lambda t: (print(t, end="", flush=True), content.append(t)))
+
+            # Clean the final content
+            final_content = "".join(content)
+            import re
+            final_content = re.sub(r'.\x08', '', final_content)
+            final_content = final_content.replace('\x08', '').replace('\\b', '')
+
+            output_path.write_text(final_content, encoding="utf-8")
+            print(f"\n\nSaved to: {output_path}")
+
+    finally:
+        rag.cleanup()
 
 if __name__ == "__main__":
     main()

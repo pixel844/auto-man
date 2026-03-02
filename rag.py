@@ -31,9 +31,9 @@ class RepoEntry:
 class Rag:
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        self.easydocz_dir = project_root / ".easydocz"
-        self.easydocz_dir.mkdir(exist_ok=True)
-        self.registry_path = self.easydocz_dir / "repos.json"
+        self.cache_dir = project_root / ".cache"
+        self.cache_dir.mkdir(exist_ok=True)
+        self.registry_path = self.cache_dir / "repos.json"
         self.library_name = "auto_man_temp_lib"
         self.library = None
 
@@ -63,7 +63,7 @@ class Rag:
         if not entry: raise ValueError(f"Repo ID {repo_id} not found")
 
         if entry.type == "remote":
-            root = self.easydocz_dir / "repos" / repo_id
+            root = self.cache_dir / "repos" / repo_id
             if not root.exists():
                 root.mkdir(parents=True, exist_ok=True)
                 import subprocess
@@ -71,26 +71,32 @@ class Rag:
         else:
             root = Path(entry.url_or_path)
 
-        # Create a uniquely named library for this session
         self.library_name = f"lib_{repo_id}_{datetime.now().strftime('%H%M%S')}"
-        print(f"Indexing repository at {root} into {self.library_name}...")
-        
         self.library = Library().create_new_library(self.library_name)
 
         with tempfile.TemporaryDirectory() as tmp_scan_dir:
             scan_path = Path(tmp_scan_dir)
             extensions = [".py", ".md", ".txt", ".sh", ".js", ".ts", ".rs", ".c", ".cpp", ".toml"]
-            indexed_count = 0
             
             for file_path in root.rglob("*"):
                 if any(part in [".venv", "venv", ".git", "__pycache__", "target", "build"] for part in file_path.parts):
                     continue
                 if file_path.is_file() and file_path.suffix.lower() in extensions:
-                    rel_name = str(file_path.relative_to(root)).replace(os.sep, "_")
-                    shutil.copy2(file_path, scan_path / f"{rel_name}.txt")
-                    indexed_count += 1
+                    try:
+                        content = file_path.read_text(encoding='utf-8', errors='ignore')
+                        if not content.strip(): continue
+                        
+                        chunks = self._chunk_text(content)
+                        rel_name = str(file_path.relative_to(root)).replace(os.sep, "_")
+                        
+                        for i, chunk in enumerate(chunks):
+                            # Ensure main.py chunks are easily identifiable for prioritization
+                            chunk_file = scan_path / f"{rel_name}_chunk{i}.txt"
+                            chunk_file.write_text(chunk, encoding='utf-8')
+                    except Exception as e:
+                        print(f"Warning: Could not process {file_path}: {e}")
 
-            if indexed_count > 0:
+            if any(scan_path.iterdir()):
                 self.library.add_files(input_folder_path=str(scan_path))
 
         self.library = Library().load_library(self.library_name)
@@ -98,6 +104,21 @@ class Rag:
         entry.last_indexed = datetime.utcnow().isoformat()
         self._save_registry(registry)
         return True
+
+    def _chunk_text(self, text: str, max_chars: int = 2000, overlap: int = 200) -> List[str]:
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = start + max_chars
+            if end >= len(text):
+                chunks.append(text[start:])
+                break
+            last_newline = text.rfind('\n', start, end)
+            if last_newline != -1 and last_newline > start + max_chars // 2:
+                end = last_newline
+            chunks.append(text[start:end])
+            start = end - overlap
+        return chunks
 
     def retrieve_context(self, query_str: str) -> str:
         if not self.library:
@@ -110,9 +131,12 @@ class Rag:
         context_parts = []
         current_file = ""
         current_length = 0
-        MAX_CHARS = 7500
-        priority_files = ["main.py", "requirements.txt", "README.md", "llm_engine.py"]
+        MAX_CHARS = 4000 # Further reduced for stability
+        
+        # PRIORITY: include these files fully
+        priority_files = ["main.py", "mcp_server.py", "requirements.txt", "README.md"]
 
+        # Pass 1: Core application logic
         for res in results:
             file_src = res.get("file_source", "")
             if not any(p in file_src for p in priority_files): continue
@@ -123,6 +147,7 @@ class Rag:
             context_parts.append(chunk)
             current_length += len(chunk)
 
+        # Pass 2: Other details
         for res in results:
             if current_length >= MAX_CHARS: break
             file_src = res.get("file_source", "")
@@ -135,3 +160,24 @@ class Rag:
             current_length += len(chunk)
 
         return "".join(context_parts)
+
+    def cleanup(self):
+        if self.library:
+            try:
+                print(f"Resetting RAG session: {self.library_name}...")
+                self.library.delete_library()
+                self.library = None
+                self.library_name = None
+            except: pass
+            
+        if self.cache_dir.exists():
+            try:
+                print("Purging local .cache...")
+                import stat
+                def remove_readonly(func, path, _):
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+                shutil.rmtree(self.cache_dir, onerror=remove_readonly)
+                self.cache_dir.mkdir(exist_ok=True)
+            except Exception as e:
+                print(f"Warning during cache purge: {e}")
