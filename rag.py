@@ -1,11 +1,14 @@
-from llmware.library import Library
-from llmware.prompts import Prompt
-from llmware.configs import LLMWareConfig
+import shutil
+import tempfile
 from pathlib import Path
 import json
 import uuid
 from datetime import datetime
 from typing import List, Optional
+import os
+
+from llmware.library import Library
+from llmware.retrieval import Query
 
 class RepoEntry:
     def __init__(self, id: str, type: str, url_or_path: str, last_indexed: Optional[str] = None, status: str = "pending"):
@@ -35,12 +38,8 @@ class Rag:
         self.easydocz_dir.mkdir(exist_ok=True)
         self.registry_path = self.easydocz_dir / "repos.json"
         
-        self.library_name = "auto_man_library"
-        
-        try:
-            self.library = Library().get_library(self.library_name)
-        except:
-            self.library = Library().create_new_library(self.library_name)
+        self.library_name = "auto_man_temp_lib"
+        self.library = None
 
     def _load_registry(self) -> List[RepoEntry]:
         if not self.registry_path.exists():
@@ -84,7 +83,28 @@ class Rag:
         else:
             root = Path(entry.url_or_path)
 
-        self.library.add_files(input_folder_path=str(root))
+        self.library_name = f"lib_{repo_id}_{datetime.now().strftime('%H%M%S')}"
+        self.library = Library().create_new_library(self.library_name)
+
+        with tempfile.TemporaryDirectory() as tmp_scan_dir:
+            scan_path = Path(tmp_scan_dir)
+            extensions = [".py", ".md", ".txt", ".sh", ".js", ".ts", ".rs", ".c", ".cpp"]
+            indexed_count = 0
+            
+            for file_path in root.rglob("*"):
+                if any(part in [".venv", "venv", ".git", "__pycache__", "target", "build"] for part in file_path.parts):
+                    continue
+                    
+                if file_path.is_file() and file_path.suffix.lower() in extensions:
+                    rel_name = str(file_path.relative_to(root)).replace(os.sep, "_")
+                    safe_name = f"{rel_name}.txt"
+                    shutil.copy2(file_path, scan_path / safe_name)
+                    indexed_count += 1
+
+            if indexed_count > 0:
+                self.library.add_files(input_folder_path=str(scan_path))
+
+        self.library = Library().load_library(self.library_name)
         
         entry.status = "indexed"
         entry.last_indexed = datetime.utcnow().isoformat()
@@ -92,21 +112,56 @@ class Rag:
         return True
 
     def retrieve_context(self, query_str: str) -> str:
-        prompter = Prompt()
-        # add_source_new_query adds materials to prompter.source_materials
-        prompter.add_source_new_query(library=self.library, query=query_str, result_count=5)
+        lib = Library().load_library(self.library_name)
+        results = Query(lib).get_whole_library()
+        
+        results.sort(key=lambda x: (x.get("file_source", ""), x.get("block_ID", 0)))
         
         context_parts = []
-        # prompter.source_materials is a list of batches
-        # Each batch is a dict: {'batch_id', 'text', 'metadata', 'biblio', ...}
-        for batch in prompter.source_materials:
-            text = batch.get("text", "")
-            # metadata in batch is a list of metadata for each entry in the batch
-            metadata_list = batch.get("metadata", [])
-            file_source = "unknown"
-            if metadata_list:
-                file_source = metadata_list[0].get("source_name", "unknown")
+        current_file = ""
+        current_length = 0
+        MAX_CHARS = 5000 
+
+        priority_files = ["main.py", "requirements.txt", "README.md"]
+        
+        for res in results:
+            file_source = res.get("file_source", "unknown")
+            is_priority = any(p in file_source for p in priority_files)
+            if not is_priority: continue
             
-            context_parts.append(f"[{file_source}]\n{text}")
+            text = (res.get("text_search") or res.get("text") or res.get("content") or "").strip()
+            if not text: continue
+
+            block_text = ""
+            if file_source != current_file:
+                block_text += f"\n=== FILE: {file_source} ===\n"
+                current_file = file_source
+            block_text += text + "\n"
             
-        return "\n\n---\n\n".join(context_parts)
+            if current_length + len(block_text) > MAX_CHARS:
+                break
+            context_parts.append(block_text)
+            current_length += len(block_text)
+
+        for res in results:
+            if current_length >= MAX_CHARS: break
+            
+            file_source = res.get("file_source", "unknown")
+            is_priority = any(p in file_source for p in priority_files)
+            if is_priority: continue
+            
+            text = (res.get("text_search") or res.get("text") or res.get("content") or "").strip()
+            if not text: continue
+
+            block_text = ""
+            if file_source != current_file:
+                block_text += f"\n=== FILE: {file_source} ===\n"
+                current_file = file_source
+            block_text += text + "\n"
+            
+            if current_length + len(block_text) > MAX_CHARS:
+                break
+            context_parts.append(block_text)
+            current_length += len(block_text)
+
+        return "".join(context_parts)

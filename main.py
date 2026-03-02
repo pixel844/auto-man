@@ -200,8 +200,9 @@ def run(args, model_dir):
             return
 
         print("\n[1/2] Indexing repository context...")
+        is_remote = repo_url.startswith("http") or repo_url.endswith(".git")
         add_resp = server.handle_request({
-            "jsonrpc": "2.0", "id": 2, "method": "add_repo", "params": {"url": repo_url, "is_remote": False}
+            "jsonrpc": "2.0", "id": 2, "method": "add_repo", "params": {"url": repo_url, "is_remote": is_remote}
         })
         repo_id = add_resp["result"]["content"][0]["text"].split(": ")[1]
         server.handle_request({
@@ -214,17 +215,26 @@ def run(args, model_dir):
         output_filename = f"{repo_name}.man"
         output_path = Path.cwd() / output_filename
 
-        summary_context = rag.retrieve_context(f"General purpose and summary of repo {repo_id}")
-        commands_context = rag.retrieve_context(f"Command line arguments, CLI flags, and main entry points in repo {repo_id}")
-        examples_context = rag.retrieve_context(f"Usage examples and typical command lines in repo {repo_id}")
-        
-        full_context = f"--- SUMMARY ---\n{summary_context}\n\n--- COMMANDS & ARGS ---\n{commands_context}\n\n--- EXAMPLES ---\n{examples_context}"
+        # Single broad context retrieval
+        full_context = rag.retrieve_context("Full project source code and summary")
         
         handler = PromptHandler(model.model_name)
         prompt = handler.get_prompt_with_tag(
-            "Generate a comprehensive technical manual page (.man) in standard ROFF format. "
-            "The output MUST include: NAME, SYNOPSIS, DESCRIPTION, COMMANDS, OPTIONS/ARGUMENTS, and EXAMPLES.\n\n"
-            f"Use the following RAG context:\n\n{full_context}"
+            "Extract actual CLI flags and logic from the provided source code to fill in this ROFF .man template for 'Auto-Man'.\n\n"
+            "--- TEMPLATE ---\n"
+            ".TH AUTO-MAN 1\n"
+            ".SH NAME\n"
+            "auto-man \\- [Summarize the tool here]\n"
+            ".SH SYNOPSIS\n"
+            "python main.py [options]\n"
+            ".SH DESCRIPTION\n"
+            "[Detailed description extracted from code]\n"
+            ".SH OPTIONS\n"
+            "[Extract flags like --gui, --repo, --mcp, --prompt here]\n"
+            ".SH EXAMPLES\n"
+            "[Provide 2 usage examples]\n"
+            "--- END TEMPLATE ---\n\n"
+            f"--- SOURCE CODE CONTEXT ---\n{full_context}\n--- END CONTEXT ---"
         )
 
         output_content = []
