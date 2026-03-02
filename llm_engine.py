@@ -20,25 +20,49 @@ class LlmEngine:
     def __init__(self, model_path: Path, tokenizer_path: Path):
         self.model_dir = model_path.parent
         self.model_name = self.model_dir.name
+        self.using_fallback = False
+        
+        # Detect platform for proactive fallback
+        import platform
+        machine = platform.machine().lower()
+        is_arm = "arm" in machine or "aarch" in machine
         
         # We can also load by name if it's a known catalog model
         # Default to qwen if no local path exists or we want specific model
-        # The user specifically wants "qwen2.5-7b-instruct-onnx-qnn"
         catalog_name = "qwen2.5-7b-instruct-onnx-qnn"
         
-        if not ModelCatalog().lookup_model_card(catalog_name):
-             # If it's not in catalog, and we have local path, register it
-             if model_path.exists():
-                 self._register_local_model(self.model_name, self.model_dir)
-                 self.model_name = self.model_name
-             else:
-                 # Fallback to catalog name which will trigger download by llmware
-                 self.model_name = catalog_name
-        else:
-            self.model_name = catalog_name
-        
-        # load model with max_output as suggested
-        self.model = ModelCatalog().load_model(self.model_name, max_output=512)
+        try:
+            if not is_arm:
+                print(f"Detected {machine} architecture. NPU models requires ARM64. Switching to CPU fallback immediately.")
+                raise OSError("Architecture mismatch for QNN")
+
+            if not ModelCatalog().lookup_model_card(catalog_name):
+                 # If it's not in catalog, and we have local path, register it
+                 if model_path.exists():
+                     self._register_local_model(self.model_name, self.model_dir)
+                     self.model_name = self.model_name
+                 else:
+                     # Fallback to catalog name which will trigger download by llmware
+                     self.model_name = catalog_name
+            else:
+                self.model_name = catalog_name
+            
+            # load model with max_output as suggested
+            print(f"Attempting to load NPU model: {self.model_name}")
+            self.model = ModelCatalog().load_model(self.model_name, max_output=512)
+            
+        except (Exception, RuntimeError, OSError) as e:
+            print(f"\n[WARNING] NPU Model Load Failed: {e}")
+            print("[INFO] Switching to CPU Fallback Model (GGUF)...")
+            self.using_fallback = True
+            
+            # Fallback to a reliable CPU model
+            fallback_model = "phi-3-mini-instruct-gguf"
+            
+            # Ensure fallback is in catalog or download it
+            self.model = ModelCatalog().load_model(fallback_model, max_output=512)
+            self.model_name = fallback_model
+            print(f"[SUCCESS] Loaded CPU Model: {fallback_model}")
 
     def _register_local_model(self, name: str, model_dir: Path):
         onnx_files = [f.name for f in model_dir.glob("*.onnx")]
