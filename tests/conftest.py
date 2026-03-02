@@ -15,6 +15,15 @@ class FakeModel:
         for token in self.responses:
             yield token
 
+    def generate(self, prompt, callback=None):
+        """Generate content and call callback with each token."""
+        full_response = ""
+        for token in self.responses:
+            full_response += token
+            if callback:
+                callback(token)
+        return full_response
+
 
 class FakeLibrary:
     """Fake Library class for testing."""

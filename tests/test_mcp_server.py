@@ -151,6 +151,10 @@ class TestMcpServer:
         """Test the generate_man tool."""
         args = {"repo_id": "repo-123"}
 
+        # Mock RAG methods to avoid llmware initialization
+        mock_mcp_server.rag.retrieve_context = Mock(return_value="test context")
+        mock_mcp_server.rag._load_registry = Mock(return_value=[])
+
         with patch("llmware.configs.LLMWareConfig.setup_llmware_workspace"):
             result = mock_mcp_server.generate_man(args)
 

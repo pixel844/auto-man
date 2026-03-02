@@ -123,18 +123,16 @@ class TestRag:
 
         # Mock file scanning - create some fake files
         with (
-            patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.glob", return_value=[]),
             patch("pathlib.Path.iterdir", return_value=[]),
             patch("auto_man.rag.Library") as mock_lib_class,
         ):
-
             mock_lib_instance = Mock()
             mock_lib_class.return_value.load_library.return_value = mock_lib_instance
 
             result = mock_rag.index_repo(repo_id)
 
-            # Should have attempted to clone and index
+            # Should have attempted to clone (via subprocess.run) and index
             assert result is True
             mock_subprocess.assert_called_once()
 
