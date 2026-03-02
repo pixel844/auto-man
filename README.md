@@ -57,7 +57,7 @@ auto-man/
 │   └── build.py            # Desktop build scripts
 ├── tests/                  # Pytest suite
 ├── models/                 # ONNX model repository
-├── pyproject.toml          # uv configuration and dependencies
+├── pyproject.toml          # Package configuration and dependencies
 └── README.md               # Documentation
 ```
 
@@ -71,12 +71,9 @@ auto-man/
 
 ## Installation
 
-Auto-Man uses [uv](https://github.com/astral-sh/uv) for high-speed dependency management and reproducible environments.
-
 ### Prerequisites
 
 - **Python 3.12**: ARM64 version is required for NPU acceleration on supported hardware.
-- **uv**: Installed on your system.
 - **NPU Drivers**: Ensure Qualcomm NPU drivers are installed for `onnxruntime-qnn` support.
 
 ### Setup
@@ -87,19 +84,20 @@ Auto-Man uses [uv](https://github.com/astral-sh/uv) for high-speed dependency ma
    cd auto-man
    ```
 
-2. **Initialize environment**:
+2. **Create and activate a virtual environment**:
    ```bash
-   uv sync
+   python -m venv .venv
+   .\.venv\Scripts\activate
    ```
 
-3. **Verify installation**:
+3. **Install the package and dependencies**:
    ```bash
-   uv run auto-man --help
+   pip install .
    ```
 
-4. **Install pre-commit hooks** (for developers):
+4. **Install optional development dependencies**:
    ```bash
-   uv run pre-commit install
+   pip install ".[dev]"
    ```
 
 ## Usage
@@ -113,7 +111,7 @@ Auto-Man uses [uv](https://github.com/astral-sh/uv) for high-speed dependency ma
 | `--gui` | Launch the PyQt6 desktop interface | `--gui` |
 | `--mcp` | Start the MCP server for tool integration | `--mcp` |
 | `--model_path, -m` | Custom path to model directory | `-m ./models/my-custom-model` |
-| `--reset` | Clear the repository registry and local cache | `--reset` |
+| `--reset` | Clear the repository registry and reset environment | `--reset` |
 
 ### Manual Page Generation
 
@@ -127,7 +125,7 @@ man ./your-project.man
 On Windows:
 ```bash
 # View as plain text
-cat ./your-project.man
+type .\your-project.man
 ```
 
 ## Model Support
@@ -142,31 +140,27 @@ Auto-Man is optimized for `qwen2.5-7b-instruct-onnx-qnn` and supports:
 ### Running Tests
 The project includes a comprehensive test suite using `pytest`:
 ```bash
-# Run all tests
-uv run pytest
-
-# Run with verbose output
-uv run pytest -v
+pytest
 ```
 
 ### Code Quality
 Maintain standards using the development toolchain:
 ```bash
 # Format code
-uv run black .
-uv run isort .
+black .
+isort .
 
 # Static analysis
-uv run flake8 .
-uv run mypy .
+flake8 .
+mypy .
 ```
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| **NPU not found** | Ensure you are using Python 3.12 ARM64 and have the `onnxruntime-qnn` package installed correctly. |
-| **Import errors** | Run `uv sync` to ensure all dependencies are installed in the virtual environment. |
+| **NPU not found** | Ensure you are using Python 3.12 ARM64 and have the `onnxruntime-genai` package installed from the ORT-Nightly index if needed. |
+| **Import errors** | Ensure your virtual environment is activated and you have run `pip install .`. |
 | **RAG indexing fails** | Ensure the repository path is valid and accessible. Remote URLs require `git` to be installed. |
 | **GUI won't launch** | Check if your environment supports PyQt6. On Linux, ensure X11/Wayland dependencies are present. |
 
