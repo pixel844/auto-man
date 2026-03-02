@@ -43,14 +43,20 @@ dev = [
     "isort",
     "flake8",
     "mypy",
+    "pytest",
 ]
 
 [project.scripts]
-auto-man = "main:main"
+auto-man = "auto_man.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["src/auto_man"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

@@ -20,9 +20,9 @@ from PyQt6.QtWidgets import (
 )
 
 # Internal imports
-from llm_engine import LlmEngine
-from mcp_server import McpServer
-from rag import Rag
+from auto_man.llm_engine import LlmEngine
+from auto_man.mcp_server import McpServer
+from auto_man.rag import Rag
 
 
 class McpWorker(QObject):

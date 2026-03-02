@@ -33,7 +33,7 @@ def build_desktop():
         f"--add-data={llmware_lib}{os.pathsep}llmware/lib",
         # We don't bundle models by default to keep EXE size small and launch fast
         # The user should keep the 'models' folder next to the EXE
-        "main.py",
+        "../src/auto_man/main.py",
     ]
 
     print(f"Executing: {' '.join(cmd)}")

@@ -41,13 +41,24 @@ class RepoEntry:
 
 
 class Rag:
-    def __init__(self, project_root: Path):
+    def __init__(
+        self, project_root: Path, registry_path: Path = None, library_factory=None
+    ):
+        """
+        Initialize the RAG system.
+
+        Args:
+            project_root: Root directory for the project
+            registry_path: Optional path to registry file (for testing)
+            library_factory: Optional factory for creating Library instances (for testing)
+        """
         self.project_root = project_root
         self.cache_dir = project_root / ".cache"
         self.cache_dir.mkdir(exist_ok=True)
-        self.registry_path = self.cache_dir / "repos.json"
+        self.registry_path = registry_path or (self.cache_dir / "repos.json")
         self.library_name = "auto_man_temp_lib"
         self.library = None
+        self.library_factory = library_factory or Library
 
     def _load_registry(self) -> List[RepoEntry]:
         if not self.registry_path.exists():
@@ -92,7 +103,7 @@ class Rag:
             root = Path(entry.url_or_path)
 
         self.library_name = f"lib_{repo_id}_{datetime.now().strftime('%H%M%S')}"
-        self.library = Library().create_new_library(self.library_name)
+        self.library = self.library_factory().create_new_library(self.library_name)
 
         with tempfile.TemporaryDirectory() as tmp_scan_dir:
             scan_path = Path(tmp_scan_dir)
@@ -134,7 +145,7 @@ class Rag:
             if any(scan_path.iterdir()):
                 self.library.add_files(input_folder_path=str(scan_path))
 
-        self.library = Library().load_library(self.library_name)
+        self.library = self.library_factory().load_library(self.library_name)
         entry.status = "indexed"
         entry.last_indexed = datetime.utcnow().isoformat()
         self._save_registry(registry)
@@ -161,7 +172,7 @@ class Rag:
         if not self.library:
             if not self.library_name:
                 return ""
-            self.library = Library().load_library(self.library_name)
+            self.library = self.library_factory().load_library(self.library_name)
 
         results = Query(self.library).get_whole_library()
         results.sort(key=lambda x: (x.get("file_source", ""), x.get("block_ID", 0)))

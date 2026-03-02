@@ -1,6 +1,8 @@
 import threading
 from typing import Any, Dict, Optional
 
+from auto_man.manual_generation import clean_roff_content
+
 
 class McpServer:
     def __init__(self, model, rag):
@@ -259,18 +261,6 @@ class McpServer:
 
         return {"content": [{"type": "text", "text": "\n".join(tree)}]}
 
-    def _clean_roff(self, text: str) -> str:
-        # Remove literal \b and actual backspace characters
-        import re
-
-        # Remove character followed by backspace (bold/underline simulation)
-        text = re.sub(r".\x08", "", text)
-        # Remove remaining backspaces
-        text = text.replace("\x08", "")
-        # Remove literal \b that some models output
-        text = text.replace("\\b", "")
-        return text
-
     def generate_man(self, args: Dict) -> Dict:
         repo_id = args.get("repo_id")
         if not repo_id:
@@ -317,7 +307,7 @@ class McpServer:
         with self.lock:
             self.model.generate(prompt, lambda t: response_parts.append(t))
 
-        final_man_content = self._clean_roff("".join(response_parts))
+        final_man_content = clean_roff_content("".join(response_parts))
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(final_man_content)
 

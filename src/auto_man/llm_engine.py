@@ -18,9 +18,25 @@ class GenerationStats:
 
 
 class LlmEngine:
-    def __init__(self, model_path: Path = None, tokenizer_path: Path = None):
+    def __init__(
+        self, model_path: Path = None, tokenizer_path: Path = None, model=None
+    ):
+        """
+        Initialize the LLM engine.
+
+        Args:
+            model_path: Path to model directory (unused, kept for compatibility)
+            tokenizer_path: Path to tokenizer (unused, kept for compatibility)
+            model: Pre-configured model instance for testing (optional)
+        """
         self.is_npu = False
         self.model_name = "qwen2.5-7b-instruct-onnx-qnn"
+
+        if model is not None:
+            # Use injected model for testing
+            self.model = model
+            self.model_name = getattr(model, "model_name", "test-model")
+            return
 
         try:
             print(f"Initializing NPU model: {self.model_name}...")
