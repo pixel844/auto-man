@@ -3,6 +3,7 @@ __pycache__/
 .easydocz/
 models/
 lib/
+*PLAN.md
 *.man
 *.exe
 *.dll

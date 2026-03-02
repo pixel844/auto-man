@@ -157,7 +157,7 @@ def run(args, model_dir):
                 print(json.dumps(err_resp))
                 sys.stdout.flush()
     elif args.prompt:
-        handler = PromptHandler(model_dir.name if model_dir.is_dir() else str(model_dir))
+        handler = PromptHandler(model.model_name)
         tagged_prompt = handler.get_prompt_with_tag(args.prompt)
         print(f"Prompt: {args.prompt}")
         print("Output: ", end="", flush=True)
@@ -208,7 +208,7 @@ def run(args, model_dir):
             "jsonrpc": "2.0", "id": 3, "method": "index_repo", "params": {"id": repo_id}
         })
 
-        print("[2/2] Generating .man page (Streaming from NPU)...\n")
+        print("[2/2] Generating .man page (Streaming)...\n")
         
         repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
         output_filename = f"{repo_name}.man"
@@ -220,7 +220,8 @@ def run(args, model_dir):
         
         full_context = f"--- SUMMARY ---\n{summary_context}\n\n--- COMMANDS & ARGS ---\n{commands_context}\n\n--- EXAMPLES ---\n{examples_context}"
         
-        prompt = (
+        handler = PromptHandler(model.model_name)
+        prompt = handler.get_prompt_with_tag(
             "Generate a comprehensive technical manual page (.man) in standard ROFF format. "
             "The output MUST include: NAME, SYNOPSIS, DESCRIPTION, COMMANDS, OPTIONS/ARGUMENTS, and EXAMPLES.\n\n"
             f"Use the following RAG context:\n\n{full_context}"

@@ -1,60 +1,37 @@
-# Application Packaging Plan (Windows, Linux, Android)
+# Application Packaging & Compilation Plan
 
-## 1. Goal
-Provide a streamlined method to compile `auto-man` into standalone executables for Windows and Linux, and outline a strategy for Android deployment.
+## 1. Overview
+The goal is to bundle Auto-Man into a single-file executable for Windows and Linux, and explore a mobile package for Android.
 
-## 2. Desktop Packaging (Windows & Linux)
-We will use **PyInstaller** to bundle the Python interpreter, dependencies (including `llmware` and `onnxruntime`), and the application scripts into a single executable or directory.
+## 2. Desktop (Windows & Linux)
+We will use **PyInstaller** or **Nuitka** for creating standalone binaries.
 
-### Prerequisites
-- Python 3.10+
-- `pip install pyinstaller`
+- **Tools:**
+    - `pip install pyinstaller`
+- **Execution Strategy:**
+    - **Step 1: Resource Bundling:** Create a `.spec` file that includes:
+        - `models/` folder (default models).
+        - `mcp_server.py`, `llm_engine.py`, `rag.py`, `gui.py`, `setup_npu.py`.
+        - PyQt6 binaries and plugins.
+    - **Step 2: Dependency Mapping:** Ensure `llmware` and its C++ shared objects are correctly collected.
+    - **Step 3: Compilation:**
+        - **Windows:** `pyinstaller --onefile --windowed --add-data "models;models" main.py`
+        - **Linux:** `pyinstaller --onefile --add-data "models:models" main.py`
+- **Optimization:** Use **Nuitka** for better performance and obfuscation if required.
 
-### Build Command (Windows)
-```powershell
-pyinstaller --noconfirm --onedir --console --name "Auto-Man" ^
-    --add-data "lib;lib" ^
-    --add-data "models;models" ^
-    --hidden-import="llmware" ^
-    --hidden-import="onnxruntime_qnn" ^
-    --hidden-import="PyQt6" ^
-    main.py
-```
-*Note: We use `--onedir` instead of `--onefile` to make debugging QNN DLL loading easier.*
+## 3. Android Support
+To run Python on Android with a GUI, we have two primary paths:
 
-### Build Command (Linux)
-```bash
-pyinstaller --noconfirm --onedir --console --name "auto-man" 
-    --add-data "lib:lib" 
-    --add-data "models:models" 
-    --hidden-import="llmware" 
-    --hidden-import="onnxruntime_qnn" 
-    main.py
-```
+- **Option A: Buildozer (Kivy/MD)**
+    - **Pros:** Mature tool for converting Python projects to `.apk`.
+    - **Cons:** Requires refactoring the PyQt6 UI to Kivy.
+- **Option B: BeeWare (Briefcase)**
+    - **Pros:** Uses native Android widgets.
+    - **Cons:** Complex dependency management for heavy libraries like `onnxruntime`.
+- **Option C: Termux (CLI only)**
+    - **Pros:** Works today without modification.
+    - **Recommendation:** Provide a one-line install script for Termux.
 
-### Post-Build Steps
-1.  **QNN Binaries:** Ensure the `lib/` folder in the output directory contains the OS-specific QNN libraries (automatically handled if `setup_npu` ran correctly before build, but `add-data` ensures they are copied).
-2.  **Models:** The `models/` folder is large. For a lighter installer, exclude `--add-data "models;models"` and let the app download models on the first run (using the existing fallback logic).
-
-## 3. Android Packaging
-Running this stack (PyQt6 + ONNX Runtime QNN + Python) natively on Android is complex. 
-
-### Strategy A: Termux (Recommended)
-This is not a "compiled app" but the most functional method for this specific tech stack.
-1.  Install Termux.
-2.  `pkg install python clang git`
-3.  `pip install -r requirements.txt` (May require building wheels for numpy/grpc).
-4.  Run `python main.py --repo ...`.
-
-### Strategy B: Briefcase / Beeware
-To build a true `.apk`, we must migrate the UI from PyQt6 to **Toga** (Beeware's native widget toolkit) or use a web-based UI wrapped in a WebView.
-1.  `pip install briefcase`
-2.  `briefcase new`
-3.  Port `gui.py` to `app.py` using Toga widgets.
-4.  `briefcase create android`
-5.  `briefcase build android`
-*Constraint:* ONNX Runtime QNN support on Android usually requires Java/Kotlin bindings or C++ NDK integration, not just the Python package. The Python `onnxruntime` package on Android is often CPU-only or NNAPI-based.
-
-## 4. Next Actions
-- [ ] Create a `build.spec` file for PyInstaller to automate the Windows/Linux build.
-- [ ] Test the generated executable on a clean VM.
+## 4. Automation
+- [ ] Create a `build.py` script to automate the PyInstaller process.
+- [ ] Set up GitHub Actions to build and release binaries for Windows (ARM64/x86) and Linux (aarch64/x86).
