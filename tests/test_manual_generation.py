@@ -1,7 +1,4 @@
-from pathlib import Path
-from unittest.mock import Mock, patch
-
-import pytest
+from unittest.mock import patch
 
 from auto_man.manual_generation import (
     build_manual_prompt,
@@ -74,8 +71,12 @@ class TestGenerateManualContent:
         """Test generating manual content."""
         fake_model.responses = ["Generated", " ", "content"]
 
-        with patch(
-            "auto_man.manual_generation.build_manual_prompt", return_value="test prompt"
+        with (
+            patch(
+                "auto_man.manual_generation.build_manual_prompt",
+                return_value="test prompt",
+            ),
+            patch("llmware.configs.LLMWareConfig.setup_llmware_workspace"),
         ):
             content = generate_manual_content(
                 fake_model, mock_rag, "https://example.com/repo"
@@ -94,13 +95,17 @@ class TestGenerateManualContent:
         def callback(token):
             tokens_received.append(token)
 
-        with patch(
-            "auto_man.manual_generation.build_manual_prompt", return_value="test prompt"
+        with (
+            patch(
+                "auto_man.manual_generation.build_manual_prompt",
+                return_value="test prompt",
+            ),
+            patch("llmware.configs.LLMWareConfig.setup_llmware_workspace"),
         ):
             content = generate_manual_content(fake_model, mock_rag, "repo", callback)
 
-            assert content == "Token1Token2"
-            assert tokens_received == ["Token1", "Token2"]
+        assert content == "Token1Token2"
+        assert tokens_received == ["Token1", "Token2"]
 
 
 class TestGenerateManual:
@@ -111,8 +116,12 @@ class TestGenerateManual:
         fake_model.responses = ["Manual", " ", "content"]
         output_path = tmp_path / "test.man"
 
-        with patch(
-            "auto_man.manual_generation.build_manual_prompt", return_value="test prompt"
+        with (
+            patch(
+                "auto_man.manual_generation.build_manual_prompt",
+                return_value="test prompt",
+            ),
+            patch("llmware.configs.LLMWareConfig.setup_llmware_workspace"),
         ):
             result_path = generate_manual(fake_model, mock_rag, "repo", output_path)
 
@@ -127,8 +136,12 @@ class TestGenerateManual:
         fake_model.responses = ["Manual\x08\x08ual", " content\\b"]
         output_path = tmp_path / "test.man"
 
-        with patch(
-            "auto_man.manual_generation.build_manual_prompt", return_value="test prompt"
+        with (
+            patch(
+                "auto_man.manual_generation.build_manual_prompt",
+                return_value="test prompt",
+            ),
+            patch("llmware.configs.LLMWareConfig.setup_llmware_workspace"),
         ):
             generate_manual(fake_model, mock_rag, "repo", output_path)
 

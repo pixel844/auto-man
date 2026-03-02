@@ -8,6 +8,7 @@ from auto_man.config import BASE_DIR, get_models_dir
 from auto_man.llm_engine import LlmEngine
 from auto_man.manual_generation import generate_manual
 from auto_man.mcp_server import McpServer
+from auto_man.prompting import PromptHandler
 from auto_man.rag import Rag
 
 
@@ -78,7 +79,10 @@ def run_repo_manual_flow(
         output_fn: Function for output (defaults to print)
     """
     if confirm_fn is None:
-        confirm_fn = lambda: input("\nGenerate manual? (y/n): ").lower() == "y"
+
+        def confirm_fn():
+            return input("\nGenerate manual? (y/n): ").lower() == "y"
+
     if output_fn is None:
         output_fn = print
 

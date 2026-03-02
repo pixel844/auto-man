@@ -1,9 +1,6 @@
-from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
-
-from auto_man.config import BASE_DIR
 
 
 class FakeModel:
@@ -86,16 +83,36 @@ def fake_query():
 @pytest.fixture
 def mock_rag(temp_project_root, fake_library):
     """Create a mock RAG instance with fake dependencies."""
+    from unittest.mock import Mock
+
     from auto_man.rag import Rag
 
     # Create a temporary registry file
     registry_path = temp_project_root / "test_registry.json"
 
-    return Rag(
+    rag = Rag(
         project_root=temp_project_root,
         registry_path=registry_path,
         library_factory=lambda: fake_library,
     )
+
+    # Replace the library with a proper mock that supports Query operations
+    mock_library = Mock()
+    mock_library.library_name = "test_library"
+    mock_library.account_name = "test_account"
+    mock_library.get_embedding_status.return_value = []  # Empty list so len() works
+
+    # Mock the Query.get_whole_library to return sample data
+    with patch("llmware.retrieval.Query") as mock_query_class:
+        mock_query_instance = Mock()
+        mock_query_instance.get_whole_library.return_value = [
+            {"file_source": "main.py", "text": "def main():", "block_ID": 0},
+            {"file_source": "README.md", "text": "# Project", "block_ID": 1},
+        ]
+        mock_query_class.return_value = mock_query_instance
+        rag.library = mock_library
+
+    return rag
 
 
 @pytest.fixture

@@ -1,8 +1,4 @@
-import json
-from pathlib import Path
 from unittest.mock import Mock, patch
-
-import pytest
 
 from auto_man.rag import Rag, RepoEntry
 
@@ -115,6 +111,7 @@ class TestRag:
         """Test indexing a remote repository."""
         # Mock the temporary directory
         mock_temp_dir.return_value.__enter__.return_value = "/tmp/test"
+        mock_temp_dir.return_value.__exit__.return_value = None
         mock_subprocess.return_value.returncode = 0
 
         # Mock the library
@@ -128,6 +125,7 @@ class TestRag:
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.glob", return_value=[]),
+            patch("pathlib.Path.iterdir", return_value=[]),
             patch("auto_man.rag.Library") as mock_lib_class,
         ):
 

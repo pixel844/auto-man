@@ -1,10 +1,7 @@
 from pathlib import Path
-from unittest.mock import Mock, call, patch
-
-import pytest
+from unittest.mock import Mock, patch
 
 from auto_man import main
-from auto_man.prompting import PromptHandler
 
 
 class TestMain:
@@ -15,7 +12,6 @@ class TestMain:
         with (
             patch("auto_man.cli.Rag") as mock_rag_class,
             patch("auto_man.cli.get_models_dir") as mock_get_models,
-            patch("builtins.print") as mock_print,
         ):
 
             mock_rag_instance = Mock()
@@ -32,9 +28,9 @@ class TestMain:
 
     @patch("auto_man.main.get_models_dir")
     @patch("auto_man.main.select_model")
-    @patch("auto_man.main.LlmEngine", new_callable=lambda: Mock)
-    @patch("auto_man.main.Rag", new_callable=lambda: Mock)
-    @patch("auto_man.cli.run_mcp_mode")
+    @patch("auto_man.main.LlmEngine", new_callable=Mock)
+    @patch("auto_man.main.Rag", new_callable=Mock)
+    @patch("auto_man.main.run_mcp_mode")
     def test_main_mcp_mode(
         self, mock_run_mcp, mock_rag_class, mock_llm_class, mock_select, mock_models_dir
     ):
@@ -42,16 +38,28 @@ class TestMain:
         mock_models_dir.return_value = Path("/models")
         mock_select.return_value = Path("/models/test")
 
-        with patch("sys.argv", ["main.py", "--mcp"]):
+        # Configure mock rag instance to have cleanup method
+        mock_rag_instance = Mock()
+        mock_rag_class.return_value = mock_rag_instance
+
+        # Configure mock llm instance to have model_name
+        mock_llm_instance = Mock()
+        mock_llm_instance.model_name = "test-model"
+        mock_llm_class.return_value = mock_llm_instance
+
+        with patch("sys.argv", ["main.py", "--mcp"]), patch("sys.stdin") as mock_stdin:
+            # Mock stdin.readline to return empty string to exit the loop
+            mock_stdin.readline.return_value = ""
             main.main()
 
         mock_run_mcp.assert_called_once()
+        mock_rag_instance.cleanup.assert_called_once()
 
     @patch("auto_man.main.get_models_dir")
     @patch("auto_man.main.select_model")
-    @patch("auto_man.main.LlmEngine", new_callable=lambda: Mock)
-    @patch("auto_man.main.Rag", new_callable=lambda: Mock)
-    @patch("auto_man.cli.run_single_prompt")
+    @patch("auto_man.main.LlmEngine", new_callable=Mock)
+    @patch("auto_man.main.Rag", new_callable=Mock)
+    @patch("auto_man.main.run_single_prompt")
     def test_main_single_prompt(
         self,
         mock_run_prompt,
@@ -64,16 +72,26 @@ class TestMain:
         mock_models_dir.return_value = Path("/models")
         mock_select.return_value = Path("/models/test")
 
+        # Configure mock rag instance to have cleanup method
+        mock_rag_instance = Mock()
+        mock_rag_class.return_value = mock_rag_instance
+
+        # Configure mock llm instance to have model_name
+        mock_llm_instance = Mock()
+        mock_llm_instance.model_name = "test-model"
+        mock_llm_class.return_value = mock_llm_instance
+
         with patch("sys.argv", ["main.py", "--prompt", "test prompt"]):
             main.main()
 
         mock_run_prompt.assert_called_once()
+        mock_rag_instance.cleanup.assert_called_once()
 
     @patch("auto_man.main.get_models_dir")
     @patch("auto_man.main.select_model")
-    @patch("auto_man.main.LlmEngine", new_callable=lambda: Mock)
-    @patch("auto_man.main.Rag", new_callable=lambda: Mock)
-    @patch("auto_man.cli.run_repo_manual_flow")
+    @patch("auto_man.main.LlmEngine", new_callable=Mock)
+    @patch("auto_man.main.Rag", new_callable=Mock)
+    @patch("auto_man.main.run_repo_manual_flow")
     @patch("builtins.input", return_value="https://github.com/user/repo")
     def test_main_default_flow(
         self,
@@ -88,15 +106,25 @@ class TestMain:
         mock_models_dir.return_value = Path("/models")
         mock_select.return_value = Path("/models/test")
 
+        # Configure mock rag instance to have cleanup method
+        mock_rag_instance = Mock()
+        mock_rag_class.return_value = mock_rag_instance
+
+        # Configure mock llm instance to have model_name
+        mock_llm_instance = Mock()
+        mock_llm_instance.model_name = "test-model"
+        mock_llm_class.return_value = mock_llm_instance
+
         with patch("sys.argv", ["main.py"]):
             main.main()
 
         mock_run_flow.assert_called_once()
+        mock_rag_instance.cleanup.assert_called_once()
 
     @patch("auto_man.main.get_models_dir")
     @patch("auto_man.main.select_model")
     @patch("auto_man.main.LlmEngine", new_callable=lambda: Mock)
-    @patch("auto_man.main.Rag", new_callable=lambda: Mock)
+    @patch("auto_man.main.Rag")
     @patch("builtins.input", return_value="")
     def test_main_default_flow_empty_repo(
         self, mock_input, mock_rag_class, mock_llm_class, mock_select, mock_models_dir
@@ -113,16 +141,31 @@ class TestMain:
         mock_rag_class.assert_not_called()
 
     @patch("sys.exit")
-    @patch("auto_man.cli.run_reset_mode")
-    def test_reset_exits_early(self, mock_reset, mock_exit):
+    @patch.object(main, "run_reset_mode")
+    @patch("auto_man.main.LlmEngine", new_callable=Mock)
+    @patch("auto_man.main.Rag", new_callable=Mock)
+    @patch("builtins.input", return_value="")
+    def test_reset_exits_early(
+        self, mock_input, mock_rag_class, mock_llm_class, mock_reset, mock_exit
+    ):
         """Test that --reset exits early."""
-        with patch("sys.argv", ["main.py", "--reset"]):
+        # Configure mock reset to call sys.exit
+        mock_reset.side_effect = lambda: mock_exit(0)
+
+        with (
+            patch("sys.argv", ["main.py", "--reset"]),
+            patch("sys.stdin", side_effect=[""]),
+        ):  # Mock stdin to avoid capture issues
             try:
                 main.main()
             except SystemExit:
                 pass
 
         mock_reset.assert_called_once()
+        mock_exit.assert_called_once_with(0)
+        # Should not initialize engines when --reset is used
+        mock_llm_class.assert_not_called()
+        mock_rag_class.assert_not_called()
 
 
 class TestCliFunctions:
@@ -133,13 +176,12 @@ class TestCliFunctions:
         with (
             patch("auto_man.cli.Rag") as mock_rag_class,
             patch("auto_man.cli.get_models_dir") as mock_get_models,
-            patch("auto_man.cli.shutil.rmtree") as mock_rmtree,
-            patch("builtins.print") as mock_print,
         ):
 
             mock_rag_instance = Mock()
             mock_rag_class.return_value = mock_rag_instance
             mock_models_dir = Mock()
+            mock_models_dir.exists.return_value = False  # Skip directory iteration
             mock_get_models.return_value = mock_models_dir
 
             with patch("sys.exit") as mock_exit:
@@ -169,23 +211,23 @@ class TestCliFunctions:
 
             mock_server_class.assert_called_once_with(mock_llm_engine, mock_rag)
 
-    def test_run_single_prompt(self, mock_llm_engine):
+    def test_run_single_prompt(self):
         """Test single prompt execution."""
-        with patch("builtins.print") as mock_print:
-            main.run_single_prompt(mock_llm_engine, "test prompt")
+        mock_llm_engine = Mock()
+        mock_llm_engine.model_name = "test-model"
+        main.run_single_prompt(mock_llm_engine, "test prompt")
 
-            # Should call generate with tagged prompt
-            mock_llm_engine.generate.assert_called_once()
-            args, kwargs = mock_llm_engine.generate.call_args
-            prompt = args[0]
-            assert "test prompt" in prompt
+        # Should call generate with tagged prompt
+        mock_llm_engine.generate.assert_called_once()
+        args, kwargs = mock_llm_engine.generate.call_args
+        prompt = args[0]
+        assert "test prompt" in prompt
 
     def test_run_repo_manual_flow(self, mock_llm_engine, mock_rag):
         """Test repository manual generation flow."""
         with (
             patch("auto_man.cli.generate_manual") as mock_generate,
             patch("auto_man.cli.McpServer") as mock_server_class,
-            patch("builtins.print") as mock_print,
             patch("builtins.input", return_value="y"),
         ):
 

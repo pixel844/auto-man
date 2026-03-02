@@ -2,8 +2,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from auto_man.mcp_server import McpServer
-
 
 class TestMcpServer:
     """Test the McpServer class."""
@@ -152,7 +150,9 @@ class TestMcpServer:
     def test_generate_man_tool(self, mock_mcp_server):
         """Test the generate_man tool."""
         args = {"repo_id": "repo-123"}
-        result = mock_mcp_server.generate_man(args)
+
+        with patch("llmware.configs.LLMWareConfig.setup_llmware_workspace"):
+            result = mock_mcp_server.generate_man(args)
 
         assert "content" in result
         assert "Successfully generated" in result["content"][0]["text"]
